@@ -189,6 +189,16 @@ impl Syscall for Proc {
         #[cfg(feature = "trace_syscall")]
         println!("[{}].exec({}, {:#x}) = {:?}", self.excl.lock().pid, String::from_utf8_lossy(&path), uargv, result);
 
+        // 打印第一个进程的页表（PID 为 1）
+        let guard = self.excl.lock();
+        if guard.pid == 1 {
+            let data = unsafe { &mut *self.data.get() };
+            if let Some(pagetable) = &data.pagetable {
+                pagetable.vm_print(0);
+            }
+        }
+        drop(guard);
+
         if result.is_err() {
             syscall_warning(error);
         }

@@ -940,3 +940,52 @@ impl Drop for PageTable {
         self.data.iter_mut().for_each(|pte| pte.free());
     }
 }
+
+impl PageTable {
+    /// # 功能说明
+    /// 打印页表内容，展示虚拟页与物理页的映射关系，以及页表的层次结构。
+    /// 输出格式包括页表起始地址、页表项索引、页表项内容和物理地址，
+    /// 使用缩进来表示页表的层级深度。
+    ///
+    /// # 参数
+    /// - `&self`：当前页表的不可变引用。
+    /// - `depth`：当前页表的层级深度，用于控制缩进。
+    ///
+    /// # 返回值
+    /// 无返回值。
+    ///
+    /// # 可能的错误
+    /// - 页表项指向无效内存时可能导致未定义行为。
+    ///
+    /// # 安全性
+    /// - 函数使用了 `unsafe` 代码来访问子页表，调用时需确保页表结构完整。
+    pub fn vm_print(&self, depth: usize) {
+        // 打印当前页表地址（仅在顶层打印）
+        if depth == 0 {
+            println!("page table {:#x}", self as *const PageTable as usize);
+        }
+
+        // 遍历所有页表项
+        for (i, pte) in self.data.iter().enumerate() {
+            // 只处理有效的页表项
+            if pte.is_valid() {
+                // 打印缩进
+                for _ in 0..depth {
+                    print!(" ..");
+                }
+                
+                // 打印页表项信息
+                println!("{}: pte {:#x} pa {:#x}", 
+                         i, 
+                         pte.data, 
+                         pte.as_phys_addr().as_usize());
+                
+                // 如果不是叶子节点，递归打印下一级页表
+                if !pte.is_leaf() {
+                    let child_pgt = unsafe { pte.as_page_table().as_ref().unwrap() };
+                    child_pgt.vm_print(depth + 1);
+                }
+            }
+        }
+    }
+}
