@@ -102,6 +102,8 @@ pub struct ProcData {
     pub pagetable: Option<Box<PageTable>>,
     /// 进程当前工作目录的 inode。
     pub cwd: Option<Inode>,
+    /// 系统调用跟踪掩码，用于控制哪些系统调用需要被跟踪。
+    pub trace_mask: usize,
 }
 
 
@@ -116,6 +118,7 @@ impl ProcData {
             tf: ptr::null_mut(),
             pagetable: None,
             cwd: None,
+            trace_mask: 0,
         }
     }
 
@@ -477,6 +480,8 @@ impl Proc {
     /// 5. 若系统调用号非法，调用 `panic!` 抛出异常，终止内核执行。
     /// 6. 将系统调用执行结果写入 TrapFrame 的返回寄存器 `a0`，
     ///    成功返回实际结果，失败返回 -1（以 `usize` 格式存储）。
+    /// 7. 如果当前进程设置了系统调用跟踪掩码，且当前系统调用在掩码中被标记，
+    ///    则打印系统调用的追踪信息，包括 PID、系统调用名称和返回值。
     ///
     /// # 参数
     /// - `&mut self`：当前进程的可变引用，用于访问其 TrapFrame 和调用系统调用实现。
@@ -498,6 +503,34 @@ impl Proc {
         let tf = unsafe { self.data.get_mut().tf.as_mut().unwrap() };
         let a7 = tf.a7;
         tf.admit_ecall();
+        
+        // 系统调用名称数组，用于根据系统调用号查找名称
+        const SYSCALL_NAMES: &[&str] = &[
+            "",          // 0 未使用
+            "fork",      // 1
+            "exit",      // 2
+            "wait",      // 3
+            "pipe",      // 4
+            "read",      // 5
+            "kill",      // 6
+            "exec",      // 7
+            "fstat",     // 8
+            "chdir",     // 9
+            "dup",       // 10
+            "getpid",    // 11
+            "sbrk",      // 12
+            "sleep",     // 13
+            "uptime",    // 14
+            "open",      // 15
+            "write",     // 16
+            "mknod",     // 17
+            "unlink",    // 18
+            "link",      // 19
+            "mkdir",     // 20
+            "close",     // 21
+            "trace",     // 22
+        ];
+        
         let sys_result = match a7 {
             1 => self.sys_fork(),
             2 => self.sys_exit(),
@@ -520,14 +553,29 @@ impl Proc {
             19 => self.sys_link(),
             20 => self.sys_mkdir(),
             21 => self.sys_close(),
+            22 => self.sys_trace(),
             _ => {
                 panic!("unknown syscall num: {}", a7);
             }
         };
-        tf.a0 = match sys_result {
+        
+        let ret = match sys_result {
             Ok(ret) => ret,
             Err(()) => -1isize as usize,
         };
+        tf.a0 = ret;
+        
+        // 检查是否需要打印系统调用跟踪信息
+        let trace_mask = unsafe { self.data.get_mut().trace_mask };
+        if trace_mask != 0 && (1 << a7) & trace_mask != 0 {
+            let pid = self.excl.lock().pid;
+            let syscall_name = if a7 < SYSCALL_NAMES.len() {
+                SYSCALL_NAMES[a7]
+            } else {
+                "unknown"
+            };
+            println!("{}: syscall {} -> {}", pid, syscall_name, ret);
+        }
     }
 
     /// # 功能说明
@@ -690,6 +738,8 @@ impl Proc {
         
         // copy process name
         cdata.name.copy_from_slice(&pdata.name);
+        // copy trace mask
+        cdata.trace_mask = pdata.trace_mask;
 
         let cpid = cexcl.pid;
 
