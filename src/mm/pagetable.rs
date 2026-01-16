@@ -971,7 +971,7 @@ impl PageTable {
             if pte.is_valid() {
                 // 打印缩进
                 for _ in 0..depth {
-                    print!(" ..");
+                    print!("..");
                 }
                 
                 // 打印页表项信息
